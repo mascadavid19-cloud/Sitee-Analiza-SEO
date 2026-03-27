@@ -1,49 +1,60 @@
-import express from 'express';
-import fetch from 'node-fetch';
-import * as cheerio from 'cheerio';
+// server.js
+import express from "express";
+import fetch from "node-fetch";
+import cheerio from "cheerio";
 
 const app = express();
 app.use(express.json());
 
-// Endpoint SEO
-app.get('/seo', async (req, res) => {
-  const url = req.query.url;
-
-  if (!url) {
-    return res.json({ error: "Introduceți un URL valid." });
-  }
+app.get("/seo", async (req, res) => {
+  const siteUrl = req.query.url;
+  if (!siteUrl) return res.json({ error: "Nu ai introdus un URL." });
 
   try {
-    const response = await fetch(url, {
-      headers: {
-        "User-Agent": "Mozilla/5.0"
-      }
-    });
+    const response = await fetch(siteUrl);
+    if (!response.ok) return res.json({ error: "Site-ul nu răspunde." });
 
     const html = await response.text();
     const $ = cheerio.load(html);
 
-    const bodyText = $('body').text().replace(/\s+/g, ' ').trim();
+    const title = $("title").text() || "N/A";
+    const metaDescription = $('meta[name="description"]').attr("content") || "N/A";
+    const h1 = $("h1").first().text() || "N/A";
+    const h2 = $("h2").map((i, el) => $(el).text()).get().join(", ") || "N/A";
+    const canonical = $('link[rel="canonical"]').attr("href") || "N/A";
+    const robots = $('meta[name="robots"]').attr("content") || "N/A";
 
-    const title = $('title').text() || 'N/A';
-    const metaDescription = $('meta[name="description"]').attr('content') || 'N/A';
-    const h1 = $('h1').first().text() || 'N/A';
-    const h2 = $('h2').map((i,e)=>$(e).text()).get().join(', ') || 'N/A';
+    const textContent = $("body").text();
+    const contentLength = textContent.length || 0;
+    const wordCount = textContent.split(/\s+/).filter(Boolean).length || 0;
 
-    const canonical = $('link[rel="canonical"]').attr('href') || 'N/A';
-    const robots = $('meta[name="robots"]').attr('content') || 'N/A';
+    const pageSizeKB = Buffer.byteLength(html, "utf8") / 1024;
 
-    const imagesTotal = $('img').length;
-    const imagesWithAlt = $('img[alt]').length;
+    const internalLinks = $("a[href^='/'], a[href^='" + siteUrl + "']").length;
+    const externalLinks = $("a[href]").not(`[href^='/'], [href^='${siteUrl}']`).length;
 
-    const internalLinks = $('a[href^="/"]').length;
-    const externalLinks = $('a[href^="http"]').filter((i,e)=>{
-      const link = $(e).attr('href');
-      return !link.includes(url);
-    }).length;
+    // Scor SEO realist: bazat pe completitudine, lungime continut, H1, meta, link-uri
+    let score = 50;
+    if (title !== "N/A") score += 10;
+    if (metaDescription !== "N/A") score += 10;
+    if (h1 !== "N/A") score += 10;
+    if (canonical !== "N/A") score += 5;
+    if (robots !== "N/A") score += 5;
+    if (contentLength > 300) score += 10;
+    if (wordCount > 100) score += 10;
+    if (internalLinks + externalLinks > 5) score += 10;
 
-    const contentLength = bodyText.length;
-    const pageSizeKB = (Buffer.byteLength(html, 'utf8') / 1024).toFixed(2);
+    score = Math.min(score, 95); // nu depaseste 95, pentru realism
+
+    // Rubrica de imbunatatiri
+    const improvements = [];
+    if (title === "N/A") improvements.push("Adaugă un titlu relevant pentru pagină.");
+    if (metaDescription === "N/A") improvements.push("Adaugă meta descriere.");
+    if (h1 === "N/A") improvements.push("Include un H1 clar.");
+    if (canonical === "N/A") improvements.push("Adaugă link canonical.");
+    if (robots === "N/A") improvements.push("Definește meta robots corect.");
+    if (contentLength < 300) improvements.push("Mărește conținutul paginii.");
+    if (internalLinks + externalLinks < 5) improvements.push("Adaugă link-uri interne și externe relevante.");
 
     res.json({
       title,
@@ -52,35 +63,19 @@ app.get('/seo', async (req, res) => {
       h2,
       canonical,
       robots,
-      imagesTotal,
-      imagesWithAlt,
       contentLength,
-      pageSizeKB,
+      wordCount,
+      pageSizeKB: pageSizeKB.toFixed(2),
       internalLinks,
-      externalLinks
+      externalLinks,
+      seoScore: score,
+      improvements,
     });
-
   } catch (err) {
     res.json({ error: "Nu am putut analiza site-ul. Verifică URL-ul." });
   }
 });
 
-// Endpoint email
-app.post('/lead', (req, res) => {
-  const email = req.body.email;
-
-  if (!email) {
-    return res.json({ error: "Email invalid." });
-  }
-
-  console.log("Lead nou:", email);
-
-  res.json({ success: true });
-});
-
-// Port
+// Server
 const PORT = process.env.PORT || 5000;
-
-app.listen(PORT, () => {
-  console.log(`Serverul rulează pe portul ${PORT}`);
-});
+app.listen(PORT, () => console.log(`Server pornit pe port ${PORT}`));
