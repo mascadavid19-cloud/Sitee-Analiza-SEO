@@ -1,9 +1,10 @@
-// server.js
 import express from "express";
 import fetch from "node-fetch";
 import * as cheerio from "cheerio";
+import cors from "cors";  // << adăugat
 
 const app = express();
+app.use(cors()); // << permite cereri din orice origin
 app.use(express.json());
 
 app.get("/seo", async (req, res) => {
@@ -11,15 +12,10 @@ app.get("/seo", async (req, res) => {
   if (!siteUrl) return res.json({ error: "Nu ai introdus un URL." });
 
   try {
-    // Folosim proxy gratuit AllOrigins
-    const proxyUrl = `https://api.allorigins.win/get?url=${encodeURIComponent(siteUrl)}`;
-
-    const response = await fetch(proxyUrl);
+    const response = await fetch(siteUrl);
     if (!response.ok) return res.json({ error: "Site-ul nu răspunde." });
 
-    const data = await response.json();
-    const html = data.contents; // HTML-ul real al site-ului
-
+    const html = await response.text();
     const $ = cheerio.load(html);
 
     const title = $("title").text() || "N/A";
@@ -32,6 +28,7 @@ app.get("/seo", async (req, res) => {
     const textContent = $("body").text();
     const contentLength = textContent.length || 0;
     const wordCount = textContent.split(/\s+/).filter(Boolean).length || 0;
+
     const pageSizeKB = Buffer.byteLength(html, "utf8") / 1024;
 
     const internalLinks = $("a[href^='/'], a[href^='" + siteUrl + "']").length;
@@ -73,7 +70,6 @@ app.get("/seo", async (req, res) => {
       improvements,
     });
   } catch (err) {
-    console.error(err);
     res.json({ error: "Nu am putut analiza site-ul. Verifică URL-ul." });
   }
 });
