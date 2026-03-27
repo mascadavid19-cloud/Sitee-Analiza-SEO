@@ -2,8 +2,10 @@
 import express from "express";
 import fetch from "node-fetch";
 import * as cheerio from "cheerio";
+import cors from "cors";
 
 const app = express();
+app.use(cors()); // permite accesul de pe landing page
 app.use(express.json());
 
 app.get("/seo", async (req, res) => {
@@ -27,13 +29,13 @@ app.get("/seo", async (req, res) => {
     const textContent = $("body").text();
     const contentLength = textContent.length || 0;
     const wordCount = textContent.split(/\s+/).filter(Boolean).length || 0;
-
     const pageSizeKB = Buffer.byteLength(html, "utf8") / 1024;
 
     const internalLinks = $("a[href^='/'], a[href^='" + siteUrl + "']").length;
     const externalLinks = $("a[href]").not(`[href^='/'], [href^='${siteUrl}']`).length;
 
-    let score = 50;
+    // scor SEO realist și echilibrat
+    let score = 60;
     if (title !== "N/A") score += 10;
     if (metaDescription !== "N/A") score += 10;
     if (h1 !== "N/A") score += 10;
@@ -43,7 +45,7 @@ app.get("/seo", async (req, res) => {
     if (wordCount > 100) score += 10;
     if (internalLinks + externalLinks > 5) score += 10;
 
-    score = Math.min(score, 95);
+    score = Math.min(score, 95); // maxim 95
 
     const improvements = [];
     if (title === "N/A") improvements.push("Adaugă un titlu relevant pentru pagină.");
