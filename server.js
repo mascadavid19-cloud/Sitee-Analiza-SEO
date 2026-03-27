@@ -1,7 +1,7 @@
 // server.js
 import express from "express";
 import fetch from "node-fetch";
-import cheerio from "cheerio";
+import * as cheerio from "cheerio";
 
 const app = express();
 app.use(express.json());
@@ -33,7 +33,6 @@ app.get("/seo", async (req, res) => {
     const internalLinks = $("a[href^='/'], a[href^='" + siteUrl + "']").length;
     const externalLinks = $("a[href]").not(`[href^='/'], [href^='${siteUrl}']`).length;
 
-    // Scor SEO realist: bazat pe completitudine, lungime continut, H1, meta, link-uri
     let score = 50;
     if (title !== "N/A") score += 10;
     if (metaDescription !== "N/A") score += 10;
@@ -44,9 +43,8 @@ app.get("/seo", async (req, res) => {
     if (wordCount > 100) score += 10;
     if (internalLinks + externalLinks > 5) score += 10;
 
-    score = Math.min(score, 95); // nu depaseste 95, pentru realism
+    score = Math.min(score, 95);
 
-    // Rubrica de imbunatatiri
     const improvements = [];
     if (title === "N/A") improvements.push("Adaugă un titlu relevant pentru pagină.");
     if (metaDescription === "N/A") improvements.push("Adaugă meta descriere.");
@@ -76,6 +74,5 @@ app.get("/seo", async (req, res) => {
   }
 });
 
-// Server
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => console.log(`Server pornit pe port ${PORT}`));
