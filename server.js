@@ -1,10 +1,10 @@
 import express from "express";
 import fetch from "node-fetch";
 import * as cheerio from "cheerio";
-import cors from "cors";  // << adăugat
+import cors from "cors";
 
 const app = express();
-app.use(cors()); // << permite cereri din orice origin
+app.use(cors());
 app.use(express.json());
 
 app.get("/seo", async (req, res) => {
@@ -12,7 +12,14 @@ app.get("/seo", async (req, res) => {
   if (!siteUrl) return res.json({ error: "Nu ai introdus un URL." });
 
   try {
-    const response = await fetch(siteUrl);
+    const response = await fetch(siteUrl, {
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) " +
+                      "AppleWebKit/537.36 (KHTML, like Gecko) " +
+                      "Chrome/114.0.0.0 Safari/537.36"
+      }
+    });
+
     if (!response.ok) return res.json({ error: "Site-ul nu răspunde." });
 
     const html = await response.text();
@@ -70,6 +77,7 @@ app.get("/seo", async (req, res) => {
       improvements,
     });
   } catch (err) {
+    console.error(err);
     res.json({ error: "Nu am putut analiza site-ul. Verifică URL-ul." });
   }
 });
