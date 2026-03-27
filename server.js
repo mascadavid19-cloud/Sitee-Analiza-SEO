@@ -2,10 +2,8 @@
 import express from "express";
 import fetch from "node-fetch";
 import * as cheerio from "cheerio";
-import cors from "cors";
 
 const app = express();
-app.use(cors()); // permite accesul de pe landing page
 app.use(express.json());
 
 app.get("/seo", async (req, res) => {
@@ -13,10 +11,15 @@ app.get("/seo", async (req, res) => {
   if (!siteUrl) return res.json({ error: "Nu ai introdus un URL." });
 
   try {
-    const response = await fetch(siteUrl);
+    // Folosim proxy gratuit AllOrigins
+    const proxyUrl = `https://api.allorigins.win/get?url=${encodeURIComponent(siteUrl)}`;
+
+    const response = await fetch(proxyUrl);
     if (!response.ok) return res.json({ error: "Site-ul nu răspunde." });
 
-    const html = await response.text();
+    const data = await response.json();
+    const html = data.contents; // HTML-ul real al site-ului
+
     const $ = cheerio.load(html);
 
     const title = $("title").text() || "N/A";
@@ -34,8 +37,7 @@ app.get("/seo", async (req, res) => {
     const internalLinks = $("a[href^='/'], a[href^='" + siteUrl + "']").length;
     const externalLinks = $("a[href]").not(`[href^='/'], [href^='${siteUrl}']`).length;
 
-    // scor SEO realist și echilibrat
-    let score = 60;
+    let score = 50;
     if (title !== "N/A") score += 10;
     if (metaDescription !== "N/A") score += 10;
     if (h1 !== "N/A") score += 10;
@@ -44,8 +46,7 @@ app.get("/seo", async (req, res) => {
     if (contentLength > 300) score += 10;
     if (wordCount > 100) score += 10;
     if (internalLinks + externalLinks > 5) score += 10;
-
-    score = Math.min(score, 95); // maxim 95
+    score = Math.min(score, 95);
 
     const improvements = [];
     if (title === "N/A") improvements.push("Adaugă un titlu relevant pentru pagină.");
@@ -72,6 +73,7 @@ app.get("/seo", async (req, res) => {
       improvements,
     });
   } catch (err) {
+    console.error(err);
     res.json({ error: "Nu am putut analiza site-ul. Verifică URL-ul." });
   }
 });
