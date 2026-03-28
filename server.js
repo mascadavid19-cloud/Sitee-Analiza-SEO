@@ -1,5 +1,4 @@
 import express from "express";
-import fetch from "node-fetch";
 import cheerio from "cheerio";
 import cors from "cors";
 
