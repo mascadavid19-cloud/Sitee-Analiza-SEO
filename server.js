@@ -1,55 +1,58 @@
+// server.js
 import express from "express";
-import fetch from "node-fetch";
-import * as cheerio from "cheerio";
-import cors from "cors";
+import puppeteer from "puppeteer";
 
 const app = express();
 app.use(express.json());
-app.use(cors()); // permite cereri cross-origin
-
-// Normalizează URL-ul: adaugă https:// dacă lipsește
-function normalizeUrl(url) {
-  if (!/^https?:\/\//i.test(url)) {
-    return "https://" + url;
-  }
-  return url;
-}
 
 app.get("/seo", async (req, res) => {
-  let siteUrl = req.query.url;
+  const siteUrl = req.query.url;
   if (!siteUrl) return res.json({ error: "Nu ai introdus un URL." });
 
-  siteUrl = normalizeUrl(siteUrl);
-
   try {
-    const response = await fetch(siteUrl, {
-      headers: {
-        "User-Agent": "Mozilla/5.0 (compatible; SEOAnalyzer/1.0; +https://sitee-analiza-seo.onrender.com)"
-      },
-      redirect: "follow"
+    const browser = await puppeteer.launch({
+      headless: true,
+      args: ["--no-sandbox", "--disable-setuid-sandbox"],
     });
+    const page = await browser.newPage();
 
-    if (!response.ok) return res.json({ error: "Site-ul nu răspunde." });
+    // Setăm user-agent real
+    await page.setUserAgent(
+      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36"
+    );
 
-    const html = await response.text();
-    const $ = cheerio.load(html);
+    // Navigăm la site
+    await page.goto(siteUrl, { waitUntil: "domcontentloaded", timeout: 30000 });
 
-    const title = $("title").text() || "N/A";
-    const metaDescription = $('meta[name="description"]').attr("content") || "N/A";
-    const h1 = $("h1").first().text() || "N/A";
-    const h2 = $("h2").map((i, el) => $(el).text()).get().join(", ") || "N/A";
-    const canonical = $('link[rel="canonical"]').attr("href") || "N/A";
-    const robots = $('meta[name="robots"]').attr("content") || "N/A";
+    const html = await page.content();
 
-    const textContent = $("body").text();
-    const contentLength = textContent.length || 0;
-    const wordCount = textContent.split(/\s+/).filter(Boolean).length || 0;
-    const pageSizeKB = Buffer.byteLength(html, "utf8") / 1024;
+    // Extragem informații
+    const title = await page.title() || "N/A";
+    const metaDescription = await page.$eval(
+      'meta[name="description"]',
+      (el) => el.content
+    ).catch(() => "N/A");
 
-    const internalLinks = $("a[href^='/'], a[href^='" + siteUrl + "']").length;
-    const externalLinks = $("a[href]").not(`[href^='/'], [href^='${siteUrl}']`).length;
+    const h1 = await page.$eval("h1", (el) => el.innerText).catch(() => "N/A");
+    const h2 = await page.$$eval("h2", (els) => els.map((el) => el.innerText).join(", ")).catch(() => "N/A");
 
-    // scor SEO echilibrat
+    const canonical = await page.$eval('link[rel="canonical"]', (el) => el.href).catch(() => "N/A");
+    const robots = await page.$eval('meta[name="robots"]', (el) => el.content).catch(() => "N/A");
+
+    const textContent = await page.$eval("body", (el) => el.innerText).catch(() => "");
+    const contentLength = textContent.length;
+    const wordCount = textContent.split(/\s+/).filter(Boolean).length;
+
+    const internalLinks = await page.$$eval(
+      `a[href^="/"], a[href^="${siteUrl}"]`,
+      (els) => els.length
+    );
+    const externalLinks = await page.$$eval(
+      `a[href]`,
+      (els) => els.filter(el => !el.href.startsWith("/") && !el.href.startsWith(siteUrl)).length
+    );
+
+    // Scor SEO realist
     let score = 50;
     if (title !== "N/A") score += 10;
     if (metaDescription !== "N/A") score += 10;
@@ -61,6 +64,7 @@ app.get("/seo", async (req, res) => {
     if (internalLinks + externalLinks > 5) score += 10;
     score = Math.min(score, 95);
 
+    // Recomandări
     const improvements = [];
     if (title === "N/A") improvements.push("Adaugă un titlu relevant pentru pagină.");
     if (metaDescription === "N/A") improvements.push("Adaugă meta descriere.");
@@ -69,6 +73,8 @@ app.get("/seo", async (req, res) => {
     if (robots === "N/A") improvements.push("Definește meta robots corect.");
     if (contentLength < 300) improvements.push("Mărește conținutul paginii.");
     if (internalLinks + externalLinks < 5) improvements.push("Adaugă link-uri interne și externe relevante.");
+
+    await browser.close();
 
     res.json({
       title,
@@ -79,15 +85,14 @@ app.get("/seo", async (req, res) => {
       robots,
       contentLength,
       wordCount,
-      pageSizeKB: pageSizeKB.toFixed(2),
       internalLinks,
       externalLinks,
       seoScore: score,
-      improvements
+      improvements,
     });
-
   } catch (err) {
-    res.json({ error: "Nu am putut analiza site-ul. Verifică URL-ul." });
+    console.error(err);
+    res.json({ error: "Nu am putut analiza site-ul. Verifică URL-ul sau site-ul poate bloca cererile." });
   }
 });
 
