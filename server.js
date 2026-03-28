@@ -1,10 +1,10 @@
 import express from "express";
-import fetch from "node-fetch";
-import cheerio from "cheerio";
 import cors from "cors";
+import cheerio from "cheerio";
+import fetch from "node-fetch"; // asigură-te că e în package.json
 
 const app = express();
-app.use(cors()); // permite frontend-ul să facă request-uri
+app.use(cors());
 
 app.get("/seo", async (req, res) => {
   const url = req.query.url;
@@ -17,21 +17,19 @@ app.get("/seo", async (req, res) => {
 
     const title = $("title").text();
     const metaDescription = $('meta[name="description"]').attr("content") || "";
-
-    const h1 = $("h1").length;
+    const h1Count = $("h1").length;
     const images = $("img");
     const imagesAltMissing = images.filter((i, el) => !$(el).attr("alt")).length;
     const links = $("a");
     const internalLinks = links.filter((i, el) => $(el).attr("href")?.startsWith(url)).length;
     const externalLinks = links.length - internalLinks;
 
-    // calcul simplificat scor SEO
     const score = Math.min(
       100,
       Math.floor(
         (title.length > 0 ? 20 : 0) +
         (metaDescription.length > 0 ? 20 : 0) +
-        (h1 > 0 ? 20 : 0) +
+        (h1Count > 0 ? 20 : 0) +
         (imagesAltMissing === 0 ? 20 : 10) +
         ((internalLinks + externalLinks > 0) ? 20 : 10)
       )
@@ -42,13 +40,13 @@ app.get("/seo", async (req, res) => {
       suggestions: [
         ...(title.length === 0 ? ["Adaugă un titlu"] : []),
         ...(metaDescription.length === 0 ? ["Adaugă meta description"] : []),
-        ...(h1 === 0 ? ["Adaugă un H1"] : []),
+        ...(h1Count === 0 ? ["Adaugă un H1"] : []),
         ...(imagesAltMissing > 0 ? ["Adaugă alt text la imagini"] : [])
       ],
       data: {
         title: { value: title, length: title.length },
         metaDescription: { value: metaDescription, length: metaDescription.length },
-        h1: { count: h1 },
+        h1: { count: h1Count },
         images: { total: images.length, missingAlt: imagesAltMissing },
         links: { internal: internalLinks, external: externalLinks }
       }
