@@ -1,7 +1,8 @@
 import express from "express";
 import cors from "cors";
 import { load } from "cheerio";
-import puppeteer from "puppeteer";
+import puppeteer from "puppeteer-core";
+import { executablePath } from "puppeteer";
 
 const app = express();
 app.use(cors());
@@ -24,6 +25,7 @@ async function fetchHTML(url) {
 
 async function fetchHTMLPuppeteer(url) {
   const browser = await puppeteer.launch({
+    executablePath: executablePath(),
     args: ["--no-sandbox", "--disable-setuid-sandbox"],
     headless: true
   });
