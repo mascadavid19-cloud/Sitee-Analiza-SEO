@@ -1,61 +1,95 @@
 import express from "express";
+import fetch from "node-fetch";
+import * as cheerio from "cheerio";
 import cors from "cors";
-import cheerio from "cheerio";
-import fetch from "node-fetch"; // asigură-te că e în package.json
 
 const app = express();
-app.use(cors());
+app.use(express.json());
+app.use(cors()); // permite cereri cross-origin
+
+// Normalizează URL-ul: adaugă https:// dacă lipsește
+function normalizeUrl(url) {
+  if (!/^https?:\/\//i.test(url)) {
+    return "https://" + url;
+  }
+  return url;
+}
 
 app.get("/seo", async (req, res) => {
-  const url = req.query.url;
-  if (!url) return res.json({ error: "URL lipsă" });
+  let siteUrl = req.query.url;
+  if (!siteUrl) return res.json({ error: "Nu ai introdus un URL." });
+
+  siteUrl = normalizeUrl(siteUrl);
 
   try {
-    const response = await fetch(url);
+    const response = await fetch(siteUrl, {
+      headers: {
+        "User-Agent": "Mozilla/5.0 (compatible; SEOAnalyzer/1.0; +https://sitee-analiza-seo.onrender.com)"
+      },
+      redirect: "follow"
+    });
+
+    if (!response.ok) return res.json({ error: "Site-ul nu răspunde." });
+
     const html = await response.text();
     const $ = cheerio.load(html);
 
-    const title = $("title").text();
-    const metaDescription = $('meta[name="description"]').attr("content") || "";
-    const h1Count = $("h1").length;
-    const images = $("img");
-    const imagesAltMissing = images.filter((i, el) => !$(el).attr("alt")).length;
-    const links = $("a");
-    const internalLinks = links.filter((i, el) => $(el).attr("href")?.startsWith(url)).length;
-    const externalLinks = links.length - internalLinks;
+    const title = $("title").text() || "N/A";
+    const metaDescription = $('meta[name="description"]').attr("content") || "N/A";
+    const h1 = $("h1").first().text() || "N/A";
+    const h2 = $("h2").map((i, el) => $(el).text()).get().join(", ") || "N/A";
+    const canonical = $('link[rel="canonical"]').attr("href") || "N/A";
+    const robots = $('meta[name="robots"]').attr("content") || "N/A";
 
-    const score = Math.min(
-      100,
-      Math.floor(
-        (title.length > 0 ? 20 : 0) +
-        (metaDescription.length > 0 ? 20 : 0) +
-        (h1Count > 0 ? 20 : 0) +
-        (imagesAltMissing === 0 ? 20 : 10) +
-        ((internalLinks + externalLinks > 0) ? 20 : 10)
-      )
-    );
+    const textContent = $("body").text();
+    const contentLength = textContent.length || 0;
+    const wordCount = textContent.split(/\s+/).filter(Boolean).length || 0;
+    const pageSizeKB = Buffer.byteLength(html, "utf8") / 1024;
+
+    const internalLinks = $("a[href^='/'], a[href^='" + siteUrl + "']").length;
+    const externalLinks = $("a[href]").not(`[href^='/'], [href^='${siteUrl}']`).length;
+
+    // scor SEO echilibrat
+    let score = 50;
+    if (title !== "N/A") score += 10;
+    if (metaDescription !== "N/A") score += 10;
+    if (h1 !== "N/A") score += 10;
+    if (canonical !== "N/A") score += 5;
+    if (robots !== "N/A") score += 5;
+    if (contentLength > 300) score += 10;
+    if (wordCount > 100) score += 10;
+    if (internalLinks + externalLinks > 5) score += 10;
+    score = Math.min(score, 95);
+
+    const improvements = [];
+    if (title === "N/A") improvements.push("Adaugă un titlu relevant pentru pagină.");
+    if (metaDescription === "N/A") improvements.push("Adaugă meta descriere.");
+    if (h1 === "N/A") improvements.push("Include un H1 clar.");
+    if (canonical === "N/A") improvements.push("Adaugă link canonical.");
+    if (robots === "N/A") improvements.push("Definește meta robots corect.");
+    if (contentLength < 300) improvements.push("Mărește conținutul paginii.");
+    if (internalLinks + externalLinks < 5) improvements.push("Adaugă link-uri interne și externe relevante.");
 
     res.json({
-      score,
-      suggestions: [
-        ...(title.length === 0 ? ["Adaugă un titlu"] : []),
-        ...(metaDescription.length === 0 ? ["Adaugă meta description"] : []),
-        ...(h1Count === 0 ? ["Adaugă un H1"] : []),
-        ...(imagesAltMissing > 0 ? ["Adaugă alt text la imagini"] : [])
-      ],
-      data: {
-        title: { value: title, length: title.length },
-        metaDescription: { value: metaDescription, length: metaDescription.length },
-        h1: { count: h1Count },
-        images: { total: images.length, missingAlt: imagesAltMissing },
-        links: { internal: internalLinks, external: externalLinks }
-      }
+      title,
+      metaDescription,
+      h1,
+      h2,
+      canonical,
+      robots,
+      contentLength,
+      wordCount,
+      pageSizeKB: pageSizeKB.toFixed(2),
+      internalLinks,
+      externalLinks,
+      seoScore: score,
+      improvements
     });
+
   } catch (err) {
-    console.error(err);
-    res.json({ error: "Nu am putut analiza site-ul." });
+    res.json({ error: "Nu am putut analiza site-ul. Verifică URL-ul." });
   }
 });
 
-const PORT = process.env.PORT || 10000;
-app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+const PORT = process.env.PORT || 5000;
+app.listen(PORT, () => console.log(`Server pornit pe port ${PORT}`));
