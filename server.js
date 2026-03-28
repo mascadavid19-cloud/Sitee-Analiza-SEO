@@ -1,6 +1,6 @@
 import express from "express";
-import puppeteer from "puppeteer-core";
-import chromium from "@sparticuz/chromium";
+import fetch from "node-fetch";
+import * as cheerio from "cheerio";
 
 const app = express();
 
@@ -14,77 +14,83 @@ app.get("/seo", async (req, res) => {
   }
 
   try {
-    const browser = await puppeteer.launch({
-      args: chromium.args,
-      executablePath: await chromium.executablePath(),
-      headless: true,
+    const response = await fetch(url, {
+      headers: {
+        "User-Agent":
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36",
+      },
+      redirect: "follow",
     });
 
-    const page = await browser.newPage();
+    const html = await response.text();
+    const $ = cheerio.load(html);
 
-    await page.setUserAgent(
-      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36"
-    );
+    const title = $("title").text() || "N/A";
+    const metaDescription =
+      $('meta[name="description"]').attr("content") || "N/A";
+    const h1 = $("h1").first().text() || "N/A";
+    const h2 =
+      $("h2")
+        .map((i, el) => $(el).text())
+        .get()
+        .join(", ") || "N/A";
 
-    await page.goto(url, {
-      waitUntil: "networkidle2",
-      timeout: 60000,
-    });
+    const canonical =
+      $('link[rel="canonical"]').attr("href") || "N/A";
+    const robots =
+      $('meta[name="robots"]').attr("content") || "N/A";
 
-    const data = await page.evaluate(() => {
-      const getMeta = (name) =>
-        document.querySelector(`meta[name="${name}"]`)?.content || "N/A";
+    const text = $("body").text();
+    const contentLength = text.length;
+    const wordCount = text.split(/\s+/).filter(Boolean).length;
 
-      const getCanonical =
-        document.querySelector('link[rel="canonical"]')?.href || "N/A";
+    const internalLinks = $("a[href^='/']").length;
+    const externalLinks = $("a[href^='http']").length;
 
-      const text = document.body.innerText || "";
+    // SCOR ECHILIBRAT
+    let score = 50;
+    if (title !== "N/A") score += 10;
+    if (metaDescription !== "N/A") score += 10;
+    if (h1 !== "N/A") score += 10;
+    if (canonical !== "N/A") score += 5;
+    if (robots !== "N/A") score += 5;
+    if (wordCount > 300) score += 10;
+    if (internalLinks > 5) score += 10;
 
-      return {
-        title: document.title || "N/A",
-        metaDescription: getMeta("description"),
-        h1: document.querySelector("h1")?.innerText || "N/A",
-        h2: [...document.querySelectorAll("h2")]
-          .map((el) => el.innerText)
-          .join(", "),
-        canonical: getCanonical,
-        robots: getMeta("robots"),
-        contentLength: text.length,
-        wordCount: text.split(/\s+/).length,
-        internalLinks: [...document.querySelectorAll("a[href^='/']")].length,
-        externalLinks: [...document.querySelectorAll("a[href^='http']")].length,
-      };
-    });
-
-    let score = 60;
-
-    if (data.title !== "N/A") score += 10;
-    if (data.metaDescription !== "N/A") score += 10;
-    if (data.h1 !== "N/A") score += 5;
-    if (data.canonical !== "N/A") score += 5;
-    if (data.wordCount > 300) score += 5;
-    if (data.internalLinks > 5) score += 5;
-
-    score = Math.min(score, 95);
+    score = Math.min(score, 90);
 
     const improvements = [];
+    if (metaDescription === "N/A")
+      improvements.push("Adaugă meta description.");
+    if (h1 === "N/A") improvements.push("Adaugă H1.");
+    if (canonical === "N/A")
+      improvements.push("Adaugă canonical.");
+    if (robots === "N/A")
+      improvements.push("Adaugă meta robots.");
+    if (wordCount < 300)
+      improvements.push("Adaugă mai mult conținut.");
+    if (internalLinks < 5)
+      improvements.push("Adaugă link-uri interne.");
 
-    if (data.metaDescription === "N/A")
-      improvements.push("Adaugă meta description");
-    if (data.h1 === "N/A") improvements.push("Adaugă H1");
-    if (data.wordCount < 300)
-      improvements.push("Adaugă mai mult conținut SEO");
-    if (data.internalLinks < 5)
-      improvements.push("Adaugă linkuri interne");
-
-    await browser.close();
-
-    res.json({ ...data, seoScore: score, improvements });
+    res.json({
+      title,
+      metaDescription,
+      h1,
+      h2,
+      canonical,
+      robots,
+      contentLength,
+      wordCount,
+      internalLinks,
+      externalLinks,
+      seoScore: score,
+      improvements,
+    });
   } catch (err) {
     console.log(err);
     res.json({
       error:
-        "Site-ul blochează analiza sau serverul este limitat (Render Free).",
+        "Nu am putut analiza site-ul. Unele site-uri blochează analiza.",
     });
   }
 });
