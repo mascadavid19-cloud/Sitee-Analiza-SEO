@@ -1,107 +1,156 @@
 import express from "express";
 import fetch from "node-fetch";
-import * as cheerio from "cheerio";
+import cheerio from "cheerio";
+import cors from "cors";
 
 const app = express();
+app.use(cors());
 
-app.get("/seo", async (req, res) => {
-  let url = req.query.url;
+const PORT = process.env.PORT || 3000;
 
-  if (!url) return res.json({ error: "Nu ai introdus URL." });
-
-  if (!url.startsWith("http")) {
-    url = "https://" + url;
-  }
-
+// helper: fetch HTML
+async function getHTML(url) {
   try {
-    const response = await fetch(url, {
+    const res = await fetch(url, {
       headers: {
         "User-Agent":
           "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36",
       },
     });
 
-    const html = await response.text();
+    return await res.text();
+  } catch (err) {
+    throw new Error("Failed to fetch site");
+  }
+}
+
+// helper: SEO scoring
+function calculateScore(data) {
+  let score = 0;
+
+  if (data.title.exists) score += 15;
+  if (data.title.length >= 30 && data.title.length <= 60) score += 10;
+
+  if (data.metaDescription.exists) score += 15;
+  if (
+    data.metaDescription.length >= 120 &&
+    data.metaDescription.length <= 160
+  )
+    score += 10;
+
+  if (data.h1.count > 0) score += 15;
+  if (data.images.missingAlt === 0) score += 10;
+  if (data.links.internal > 0) score += 10;
+
+  return Math.min(score, 100);
+}
+
+// helper: suggestions
+function generateSuggestions(data) {
+  const suggestions = [];
+
+  if (!data.title.exists)
+    suggestions.push("Add a title tag to your page.");
+
+  if (
+    data.title.length < 30 ||
+    data.title.length > 60
+  )
+    suggestions.push("Keep title between 30-60 characters.");
+
+  if (!data.metaDescription.exists)
+    suggestions.push("Add a meta description (120-160 chars).");
+
+  if (data.h1.count === 0)
+    suggestions.push("Add at least one H1 tag.");
+
+  if (data.images.missingAlt > 0)
+    suggestions.push(
+      `${data.images.missingAlt} images are missing alt attributes.`
+    );
+
+  return suggestions;
+}
+
+app.get("/seo", async (req, res) => {
+  let { url } = req.query;
+
+  if (!url) {
+    return res.status(400).json({ error: "Missing URL" });
+  }
+
+  if (!url.startsWith("http")) {
+    url = "https://" + url;
+  }
+
+  try {
+    const html = await getHTML(url);
     const $ = cheerio.load(html);
 
-    const title = $("title").text() || "N/A";
-    const metaDescription =
-      $('meta[name="description"]').attr("content") || "N/A";
-    const h1 = $("h1").first().text() || "N/A";
-    const h2 =
-      $("h2")
-        .map((i, el) => $(el).text())
-        .get()
-        .join(", ") || "N/A";
+    const title = $("title").text().trim();
+    const metaDescription = $('meta[name="description"]').attr("content") || "";
 
-    const canonical =
-      $('link[rel="canonical"]').attr("href") || "N/A";
-    const robots =
-      $('meta[name="robots"]').attr("content") || "N/A";
+    const h1 = $("h1");
+    const images = $("img");
 
-    const text = $("body").text();
-    const contentLength = text.length;
-    const wordCount = text.split(/\s+/).filter(Boolean).length;
-
-    const internalLinks = $("a[href^='/']").length;
-    const externalLinks = $("a[href^='http']").length;
-
-    // scor realist
-    let score = 50;
-    if (title !== "N/A") score += 10;
-    if (metaDescription !== "N/A") score += 10;
-    if (h1 !== "N/A") score += 10;
-    if (canonical !== "N/A") score += 5;
-    if (robots !== "N/A") score += 5;
-    if (wordCount > 300) score += 10;
-    if (internalLinks > 5) score += 10;
-
-    score = Math.min(score, 90);
-
-    const improvements = [];
-    if (metaDescription === "N/A") improvements.push("Adaugă meta description.");
-    if (h1 === "N/A") improvements.push("Adaugă H1.");
-    if (canonical === "N/A") improvements.push("Adaugă canonical.");
-    if (robots === "N/A") improvements.push("Adaugă meta robots.");
-    if (wordCount < 300) improvements.push("Adaugă mai mult conținut.");
-    if (internalLinks < 5) improvements.push("Adaugă link-uri interne.");
-
-    res.json({
-      title,
-      metaDescription,
-      h1,
-      h2,
-      canonical,
-      robots,
-      contentLength,
-      wordCount,
-      internalLinks,
-      externalLinks,
-      seoScore: score,
-      improvements,
+    let missingAlt = 0;
+    images.each((i, el) => {
+      if (!$(el).attr("alt")) missingAlt++;
     });
 
-  } catch (err) {
-    // 🔥 fallback inteligent (SECRETUL)
+    const links = $("a");
+    let internal = 0;
+    let external = 0;
+
+    links.each((i, el) => {
+      const href = $(el).attr("href");
+      if (!href) return;
+
+      if (href.startsWith("/") || href.includes(url)) internal++;
+      else external++;
+    });
+
+    const data = {
+      title: {
+        value: title,
+        length: title.length,
+        exists: !!title,
+      },
+      metaDescription: {
+        value: metaDescription,
+        length: metaDescription.length,
+        exists: !!metaDescription,
+      },
+      h1: {
+        count: h1.length,
+      },
+      images: {
+        total: images.length,
+        missingAlt,
+      },
+      links: {
+        total: links.length,
+        internal,
+        external,
+      },
+    };
+
+    const score = calculateScore(data);
+    const suggestions = generateSuggestions(data);
+
     res.json({
-      title: "Analiză limitată",
-      metaDescription: "Nu am putut extrage toate datele.",
-      h1: "N/A",
-      h2: "N/A",
-      canonical: "N/A",
-      robots: "N/A",
-      contentLength: 0,
-      wordCount: 0,
-      internalLinks: 0,
-      externalLinks: 0,
-      seoScore: 65,
-      improvements: [
-        "Acest site are protecții avansate.",
-        "Este necesară o analiză SEO profesională.",
-        "Contactează-ne pentru un audit complet."
-      ]
+      url,
+      score,
+      data,
+      suggestions,
+    });
+  } catch (err) {
+    res.status(500).json({
+      error: "Failed to analyze site",
     });
   }
 });
 
-app.listen(10000, () => console.log("Server running"));
+app.listen(PORT, () => {
+  console.log(`Server running on port ${PORT}`);
+});
