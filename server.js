@@ -1,100 +1,92 @@
-// server.js
 import express from "express";
-import puppeteer from "puppeteer";
+import puppeteer from "puppeteer-core";
+import chromium from "@sparticuz/chromium";
 
 const app = express();
-app.use(express.json());
 
 app.get("/seo", async (req, res) => {
-  const siteUrl = req.query.url;
-  if (!siteUrl) return res.json({ error: "Nu ai introdus un URL." });
+  let url = req.query.url;
+
+  if (!url) return res.json({ error: "Nu ai introdus URL." });
+
+  if (!url.startsWith("http")) {
+    url = "https://" + url;
+  }
 
   try {
-    let url = siteUrl;
-    if (!/^https?:\/\//i.test(url)) {
-      url = "https://" + url; // adaugă https dacă nu există
-    }
-
     const browser = await puppeteer.launch({
+      args: chromium.args,
+      executablePath: await chromium.executablePath(),
       headless: true,
-      args: ["--no-sandbox", "--disable-setuid-sandbox"]
     });
 
     const page = await browser.newPage();
 
-    // User-agent real
     await page.setUserAgent(
-      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36"
+      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36"
     );
 
-    await page.goto(url, { waitUntil: "domcontentloaded", timeout: 30000 });
+    await page.goto(url, {
+      waitUntil: "networkidle2",
+      timeout: 60000,
+    });
 
-    const title = await page.title() || "N/A";
-    const metaDescription = await page.$eval(
-      'meta[name="description"]',
-      el => el.content
-    ).catch(() => "N/A");
+    const data = await page.evaluate(() => {
+      const getMeta = (name) =>
+        document.querySelector(`meta[name="${name}"]`)?.content || "N/A";
 
-    const h1 = await page.$eval("h1", el => el.innerText).catch(() => "N/A");
-    const h2 = await page.$$eval("h2", els => els.map(el => el.innerText).join(", ")).catch(() => "N/A");
-    const canonical = await page.$eval('link[rel="canonical"]', el => el.href).catch(() => "N/A");
-    const robots = await page.$eval('meta[name="robots"]', el => el.content).catch(() => "N/A");
+      const getCanonical =
+        document.querySelector('link[rel="canonical"]')?.href || "N/A";
 
-    const textContent = await page.$eval("body", el => el.innerText).catch(() => "");
-    const contentLength = textContent.length;
-    const wordCount = textContent.split(/\s+/).filter(Boolean).length;
+      const text = document.body.innerText || "";
 
-    const internalLinks = await page.$$eval(
-      `a[href^="/"], a[href^="${url}"]`,
-      els => els.length
-    );
-    const externalLinks = await page.$$eval(
-      "a[href]",
-      els => els.filter(el => !el.href.startsWith("/") && !el.href.startsWith(url)).length
-    );
+      return {
+        title: document.title || "N/A",
+        metaDescription: getMeta("description"),
+        h1: document.querySelector("h1")?.innerText || "N/A",
+        h2: [...document.querySelectorAll("h2")]
+          .map((el) => el.innerText)
+          .join(", "),
+        canonical: getCanonical,
+        robots: getMeta("robots"),
+        contentLength: text.length,
+        wordCount: text.split(/\s+/).length,
+        internalLinks: [...document.querySelectorAll("a[href^='/']")].length,
+        externalLinks: [...document.querySelectorAll("a[href^='http']")].length,
+      };
+    });
 
-    // Scor SEO realist
-    let score = 50;
-    if (title !== "N/A") score += 10;
-    if (metaDescription !== "N/A") score += 10;
-    if (h1 !== "N/A") score += 10;
-    if (canonical !== "N/A") score += 5;
-    if (robots !== "N/A") score += 5;
-    if (contentLength > 300) score += 10;
-    if (wordCount > 100) score += 10;
-    if (internalLinks + externalLinks > 5) score += 10;
+    let score = 60;
+
+    if (data.title !== "N/A") score += 10;
+    if (data.metaDescription !== "N/A") score += 10;
+    if (data.h1 !== "N/A") score += 5;
+    if (data.canonical !== "N/A") score += 5;
+    if (data.wordCount > 300) score += 5;
+    if (data.internalLinks > 5) score += 5;
+
     score = Math.min(score, 95);
 
     const improvements = [];
-    if (title === "N/A") improvements.push("Adaugă un titlu relevant pentru pagină.");
-    if (metaDescription === "N/A") improvements.push("Adaugă meta descriere.");
-    if (h1 === "N/A") improvements.push("Include un H1 clar.");
-    if (canonical === "N/A") improvements.push("Adaugă link canonical.");
-    if (robots === "N/A") improvements.push("Definește meta robots corect.");
-    if (contentLength < 300) improvements.push("Mărește conținutul paginii.");
-    if (internalLinks + externalLinks < 5) improvements.push("Adaugă link-uri interne și externe relevante.");
+
+    if (data.metaDescription === "N/A")
+      improvements.push("Adaugă meta description");
+    if (data.h1 === "N/A") improvements.push("Adaugă H1");
+    if (data.wordCount < 300)
+      improvements.push("Adaugă mai mult conținut SEO");
+    if (data.internalLinks < 5)
+      improvements.push("Adaugă linkuri interne");
 
     await browser.close();
 
-    res.json({
-      title,
-      metaDescription,
-      h1,
-      h2,
-      canonical,
-      robots,
-      contentLength,
-      wordCount,
-      internalLinks,
-      externalLinks,
-      seoScore: score,
-      improvements
-    });
+    res.json({ ...data, seoScore: score, improvements });
   } catch (err) {
-    console.error(err);
-    res.json({ error: "Nu am putut analiza site-ul. Verifică URL-ul sau site-ul poate bloca cererile." });
+    console.log(err);
+    res.json({
+      error:
+        "Site-ul blochează analiza sau serverul este limitat (Render Free).",
+    });
   }
 });
 
-const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => console.log(`Server pornit pe port ${PORT}`));
+app.listen(10000, () => console.log("Server running"));
