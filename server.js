@@ -10,46 +10,47 @@ app.get("/seo", async (req, res) => {
   if (!siteUrl) return res.json({ error: "Nu ai introdus un URL." });
 
   try {
+    let url = siteUrl;
+    if (!/^https?:\/\//i.test(url)) {
+      url = "https://" + url; // adaugă https dacă nu există
+    }
+
     const browser = await puppeteer.launch({
       headless: true,
-      args: ["--no-sandbox", "--disable-setuid-sandbox"],
+      args: ["--no-sandbox", "--disable-setuid-sandbox"]
     });
+
     const page = await browser.newPage();
 
-    // Setăm user-agent real
+    // User-agent real
     await page.setUserAgent(
       "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36"
     );
 
-    // Navigăm la site
-    await page.goto(siteUrl, { waitUntil: "domcontentloaded", timeout: 30000 });
+    await page.goto(url, { waitUntil: "domcontentloaded", timeout: 30000 });
 
-    const html = await page.content();
-
-    // Extragem informații
     const title = await page.title() || "N/A";
     const metaDescription = await page.$eval(
       'meta[name="description"]',
-      (el) => el.content
+      el => el.content
     ).catch(() => "N/A");
 
-    const h1 = await page.$eval("h1", (el) => el.innerText).catch(() => "N/A");
-    const h2 = await page.$$eval("h2", (els) => els.map((el) => el.innerText).join(", ")).catch(() => "N/A");
+    const h1 = await page.$eval("h1", el => el.innerText).catch(() => "N/A");
+    const h2 = await page.$$eval("h2", els => els.map(el => el.innerText).join(", ")).catch(() => "N/A");
+    const canonical = await page.$eval('link[rel="canonical"]', el => el.href).catch(() => "N/A");
+    const robots = await page.$eval('meta[name="robots"]', el => el.content).catch(() => "N/A");
 
-    const canonical = await page.$eval('link[rel="canonical"]', (el) => el.href).catch(() => "N/A");
-    const robots = await page.$eval('meta[name="robots"]', (el) => el.content).catch(() => "N/A");
-
-    const textContent = await page.$eval("body", (el) => el.innerText).catch(() => "");
+    const textContent = await page.$eval("body", el => el.innerText).catch(() => "");
     const contentLength = textContent.length;
     const wordCount = textContent.split(/\s+/).filter(Boolean).length;
 
     const internalLinks = await page.$$eval(
-      `a[href^="/"], a[href^="${siteUrl}"]`,
-      (els) => els.length
+      `a[href^="/"], a[href^="${url}"]`,
+      els => els.length
     );
     const externalLinks = await page.$$eval(
-      `a[href]`,
-      (els) => els.filter(el => !el.href.startsWith("/") && !el.href.startsWith(siteUrl)).length
+      "a[href]",
+      els => els.filter(el => !el.href.startsWith("/") && !el.href.startsWith(url)).length
     );
 
     // Scor SEO realist
@@ -64,7 +65,6 @@ app.get("/seo", async (req, res) => {
     if (internalLinks + externalLinks > 5) score += 10;
     score = Math.min(score, 95);
 
-    // Recomandări
     const improvements = [];
     if (title === "N/A") improvements.push("Adaugă un titlu relevant pentru pagină.");
     if (metaDescription === "N/A") improvements.push("Adaugă meta descriere.");
@@ -88,7 +88,7 @@ app.get("/seo", async (req, res) => {
       internalLinks,
       externalLinks,
       seoScore: score,
-      improvements,
+      improvements
     });
   } catch (err) {
     console.error(err);
